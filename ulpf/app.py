@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+PACKAGE_DIR = Path(__file__).resolve().parent
 
 
 def load_events(events_path: str | Path) -> list[dict[str, Any]]:
@@ -60,19 +61,147 @@ def filter_events(events: list[dict[str, Any]], query: str) -> list[dict[str, An
     return visible
 
 
-def page_data(events: list[dict[str, Any]], query: str = "") -> dict[str, Any]:
+def same_address_peers(events: list[dict[str, Any]], selected: dict[str, Any]) -> list[dict[str, str]]:
+    src = str(selected.get("network.src_ip") or "")
+    if not src:
+        return []
+    selected_id = selected.get("event_id")
+    peers: list[dict[str, str]] = []
+    for event in events:
+        if event.get("event_id") == selected_id:
+            continue
+        if str(event.get("network.src_ip") or "") != src:
+            continue
+        peers.append(
+            {
+                "observer.vendor": str(event.get("observer.vendor") or ""),
+                "event.action": str(event.get("event.action") or ""),
+                "event.outcome": str(event.get("event.outcome") or ""),
+            }
+        )
+    return peers
+
+
+def same_address_index(events: list[dict[str, Any]]) -> dict[str, list[dict[str, str]]]:
+    index: dict[str, list[dict[str, str]]] = {}
+    for event in events:
+        index[str(event.get("event_id") or "")] = same_address_peers(events, event)
+    return index
+
+
+def loaded_parsers() -> list[dict[str, str]]:
+    from ulpf import detect as detect_mod
+    from ulpf.parsers import register_all
+
+    register_all(detect_mod)
+    mappings_dir = PACKAGE_DIR / "mappings"
+    listed: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for fmt, parse in detect_mod._REGISTRY:
+        name = parse.__module__.rsplit(".", 1)[-1]
+        key = (name, fmt)
+        if key in seen:
+            continue
+        seen.add(key)
+        mapping_name = f"{name}.yaml"
+        mapping_path = mappings_dir / mapping_name
+        listed.append(
+            {
+                "name": name,
+                "format": fmt,
+                "mapping": mapping_name if mapping_path.is_file() else "",
+            }
+        )
+    return listed
+
+
+def compute_ingest_report(out_dir: str | Path, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    raw_path = Path(out_dir) / "raw.jsonl"
+    if not raw_path.is_file():
+        return []
+    by_id = {str(event.get("event_id") or ""): event for event in events}
+    rows: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for line in raw_path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        raw = json.loads(line)
+        name = str(raw.get("source_file") or "")
+        if name not in rows:
+            rows[name] = {
+                "file": name,
+                "lines": 0,
+                "parsed": 0,
+                "failed": 0,
+                "duplicates": 0,
+            }
+            order.append(name)
+        row = rows[name]
+        row["lines"] += 1
+        event = by_id.get(str(raw.get("raw_event_id") or ""))
+        if event is None:
+            continue
+        if event.get("parse.status") == "ok":
+            row["parsed"] += 1
+        else:
+            row["failed"] += 1
+        if (event.get("unmapped") or {}).get("duplicate"):
+            row["duplicates"] += 1
+    return [rows[name] for name in order]
+
+
+def load_ingest_report(out_dir: str | Path, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    path = Path(out_dir) / "ingest_report.json"
+    if path.is_file():
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, list):
+            return loaded
+    return compute_ingest_report(out_dir, events)
+
+
+def page_data(
+    events: list[dict[str, Any]],
+    query: str = "",
+    out_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    ingest = load_ingest_report(out_dir, events) if out_dir is not None else []
     return {
         "summary": summarize(events),
         "top_sources": busiest_source_ips(events),
         "rows": filter_events(events, query),
+        "ingest": ingest,
+        "parsers": loaded_parsers(),
+        "same_address": same_address_index(events),
     }
 
 
-def render_html(events: list[dict[str, Any]], query: str = "") -> str:
-    data = page_data(events, query)
+def render_html(
+    events: list[dict[str, Any]],
+    query: str = "",
+    out_dir: str | Path | None = None,
+) -> str:
+    data = page_data(events, query, out_dir)
     summary = data["summary"]
     top_items = "".join(
         f"<li><code>{html.escape(ip)}</code> — {count}</li>" for ip, count in data["top_sources"]
+    )
+    ingest_items = "".join(
+        (
+            f"<li><code>{html.escape(str(row.get('file') or ''))}</code>"
+            f" lines {int(row.get('lines') or 0)}"
+            f" parsed {int(row.get('parsed') or 0)}"
+            f" failed {int(row.get('failed') or 0)}"
+            f" duplicates {int(row.get('duplicates') or 0)}</li>"
+        )
+        for row in data["ingest"]
+    )
+    parser_items = "".join(
+        (
+            f"<li><code>{html.escape(row['name'])}</code>"
+            f" format {html.escape(row['format'])}"
+            f" mapping {html.escape(row['mapping'])}</li>"
+        )
+        for row in data["parsers"]
     )
     rows = []
     for event in data["rows"]:
@@ -80,8 +209,10 @@ def render_html(events: list[dict[str, Any]], query: str = "") -> str:
         raw_hash = str(event.get("provenance.raw_hash") or "")
         src = str(event.get("network.src_ip") or "")
         dst = str(event.get("network.dst_ip") or "")
+        event_id = str(event.get("event_id") or "")
         rows.append(
             "<tr"
+            f' data-id="{html.escape(event_id, quote=True)}"'
             f' data-src="{html.escape(src, quote=True)}"'
             f' data-dst="{html.escape(dst, quote=True)}"'
             f' data-raw="{html.escape(raw_text, quote=True)}"'
@@ -99,6 +230,7 @@ def render_html(events: list[dict[str, Any]], query: str = "") -> str:
         )
     table_body = "\n".join(rows) if rows else '<tr class="empty"><td colspan="8">No matching events</td></tr>'
     q = html.escape(query, quote=True)
+    peers_json = html.escape(json.dumps(data["same_address"], ensure_ascii=False), quote=True)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -108,7 +240,7 @@ def render_html(events: list[dict[str, Any]], query: str = "") -> str:
     :root {{ color-scheme: dark; }}
     body {{ font-family: Segoe UI, sans-serif; margin: 1.5rem; background: #111; color: #eee; }}
     h1 {{ font-size: 1.2rem; }}
-    .summary, .sources, .filter, table, #detail {{ margin-bottom: 1rem; }}
+    .summary, .sources, .ingest, .parsers, .filter, table, #detail, #same-address {{ margin-bottom: 1rem; }}
     .summary span {{ margin-right: 1.25rem; }}
     input {{ width: 22rem; max-width: 100%; padding: 0.4rem; }}
     table {{ border-collapse: collapse; width: 100%; }}
@@ -127,9 +259,17 @@ def render_html(events: list[dict[str, Any]], query: str = "") -> str:
     <span>Distinct vendors: {summary["distinct_vendors"]}</span>
     <span>Authentication failures: {summary["authentication_failures"]}</span>
   </p>
+  <div class="ingest">
+    <strong>Ingest</strong>
+    <ul>{ingest_items}</ul>
+  </div>
   <div class="sources">
     <strong>Busiest source IPs</strong>
     <ol>{top_items}</ol>
+  </div>
+  <div class="parsers">
+    <strong>Parsers loaded</strong>
+    <ul>{parser_items}</ul>
   </div>
   <p class="filter">
     <label>Filter by src_ip or dst_ip
@@ -147,10 +287,28 @@ def render_html(events: list[dict[str, Any]], query: str = "") -> str:
     <tbody id="event-rows">{table_body}</tbody>
   </table>
   <div id="detail">Click a row to show provenance.</div>
+  <div id="same-address"></div>
+  <script type="application/json" id="same-address-data">{peers_json}</script>
   <script>
     const box = document.getElementById("ip-filter");
     const rows = Array.from(document.querySelectorAll("#event-rows tr[data-src]"));
     const detail = document.getElementById("detail");
+    const sameBox = document.getElementById("same-address");
+    const peers = JSON.parse(document.getElementById("same-address-data").textContent);
+    function clearDetail() {{
+      detail.textContent = "";
+      sameBox.textContent = "";
+    }}
+    function showPeers(id) {{
+      const items = peers[id] || [];
+      if (!items.length) {{
+        sameBox.textContent = "Same address: none";
+        return;
+      }}
+      sameBox.innerHTML = "<strong>Same address</strong><ul>" + items.map((item) =>
+        "<li>" + (item["observer.vendor"] || "") + " " + (item["event.action"] || "") + " " + (item["event.outcome"] || "") + "</li>"
+      ).join("") + "</ul>";
+    }}
     function applyFilter() {{
       const q = box.value.toLowerCase();
       rows.forEach((row) => {{
@@ -158,6 +316,11 @@ def render_html(events: list[dict[str, Any]], query: str = "") -> str:
         const dst = (row.dataset.dst || "").toLowerCase();
         row.hidden = Boolean(q) && !src.includes(q) && !dst.includes(q);
       }});
+      const selected = rows.find((row) => row.classList.contains("selected"));
+      if (selected && selected.hidden) {{
+        selected.classList.remove("selected");
+        clearDetail();
+      }}
     }}
     box.addEventListener("input", applyFilter);
     rows.forEach((row) => {{
@@ -165,6 +328,7 @@ def render_html(events: list[dict[str, Any]], query: str = "") -> str:
         rows.forEach((other) => other.classList.remove("selected"));
         row.classList.add("selected");
         detail.textContent = "raw_text: " + (row.dataset.raw || "") + "\\nraw_hash: " + (row.dataset.hash || "");
+        showPeers(row.dataset.id || "");
       }});
     }});
     applyFilter();
@@ -193,7 +357,7 @@ class EventHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         query = parse_qs(parsed.query).get("q", [""])[0]
-        page = render_html(load_events(events_path), query).encode("utf-8")
+        page = render_html(load_events(events_path), query, self.out_dir).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(page)))

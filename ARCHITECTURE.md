@@ -22,6 +22,10 @@ Parser modules live under `ulpf/parsers/`. Each module exposes `parse(line, mapp
 
 `events.jsonl` stores one normalized record per input line using a fixed key set (observer, network, user, event, parse, provenance, unmapped). Successful parses fill vendor-specific fields; failed parses still emit a row with `parse.status` failed and empty network fields where appropriate. Outcomes are limited to success, failure, or unknown. `finalize_event` in `schema.py` ensures every row has the same shape.
 
+## Analytics-ready output
+
+`events.jsonl` is the full taxonomy. `features.jsonl` is the fixed columns, with no vendor sentence. `raw.jsonl` is the evidence. No model ships in this repository. Billions of events per day would be the same three files on a bus, which this prototype does not run.
+
 ## Local page
 
 `ulpf/app.py` serves a read-only HTML view over an existing `events.jsonl` using the standard library HTTP server on `127.0.0.1` and a free port. It loads the file, computes summary counts and busiest source IPs in Python, and renders a filterable table. Row clicks show `provenance.raw_text` and `provenance.raw_hash`. Optional `--rebuild` re-runs the pipeline before serving; otherwise the page does not re-parse.

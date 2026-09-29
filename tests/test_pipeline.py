@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ulpf.detect import detect
 from ulpf.pipeline import run
-from ulpf.schema import EVENT_KEYS
+from ulpf.schema import EVENT_KEYS, FEATURE_KEYS
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "samples"
@@ -266,3 +266,26 @@ def test_replay_duplicate_flag_and_ingest_report(tmp_path: Path) -> None:
     assert replay["lines"] == 1
     assert replay["duplicates"] == 1
     assert cisco["duplicates"] == 0
+
+
+def test_features_jsonl_fixed_columns(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    run(SAMPLES, out)
+    events = _load_events(out)
+    features = [
+        json.loads(line) for line in (out / "features.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(features) == len(events)
+    for row in features:
+        assert list(row.keys()) == list(FEATURE_KEYS)
+        assert "raw_text" not in row
+        assert "provenance.raw_text" not in row
+
+    failed = next(row for row in features if row["raw_hash"] == _sha256(CISCO_GARBAGE))
+    assert failed["parse_ok"] is False
+
+    fg2_rows = [row for row in features if row["raw_hash"] == _sha256(FG2)]
+    assert len(fg2_rows) == 2
+    assert fg2_rows[0]["duplicate"] is False
+    assert fg2_rows[1]["duplicate"] is True
+    assert fg2_rows[1]["parse_ok"] is True

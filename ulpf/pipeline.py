@@ -12,7 +12,7 @@ import yaml
 from ulpf import detect as detect_mod
 from ulpf.detect import detect, parsers_for
 from ulpf.parsers import register_all
-from ulpf.schema import finalize_event, raw_hash
+from ulpf.schema import feature_record, finalize_event, raw_hash
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
@@ -60,12 +60,13 @@ def run(input_dir: str | Path, output_dir: str | Path) -> None:
     mappings = _load_mappings()
     raw_path = destination / "raw.jsonl"
     events_path = destination / "events.jsonl"
+    features_path = destination / "features.jsonl"
     report: list[dict[str, Any]] = []
     seen_hashes: set[str] = set()
 
     with raw_path.open("w", encoding="utf-8") as raw_out, events_path.open(
         "w", encoding="utf-8"
-    ) as events_out:
+    ) as events_out, features_path.open("w", encoding="utf-8") as features_out:
         for source_file in _iter_input_files(source):
             file_row: dict[str, Any] = {
                 "file": source_file.name,
@@ -129,6 +130,7 @@ def run(input_dir: str | Path, output_dir: str | Path) -> None:
                     formats.append(fmt)
 
                 events_out.write(json.dumps(event, ensure_ascii=False) + "\n")
+                features_out.write(json.dumps(feature_record(event), ensure_ascii=False) + "\n")
             file_row["formats"] = formats
             report.append(file_row)
 

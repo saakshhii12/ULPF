@@ -77,6 +77,20 @@ EVENT_KEYS = (
 
 VALID_OUTCOMES = frozenset({"success", "failure", "unknown"})
 
+FEATURE_KEYS = (
+    "raw_hash",
+    "timestamp",
+    "src_ip",
+    "dst_ip",
+    "vendor",
+    "action",
+    "outcome",
+    "category",
+    "severity",
+    "parse_ok",
+    "duplicate",
+)
+
 
 def empty_event() -> dict[str, Any]:
     return {
@@ -123,3 +137,19 @@ def finalize_event(event: dict[str, Any]) -> dict[str, Any]:
     if record["unmapped"] is None:
         record["unmapped"] = {}
     return record
+
+
+def feature_record(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "raw_hash": event.get("provenance.raw_hash", ""),
+        "timestamp": event.get("timestamp", ""),
+        "src_ip": event.get("network.src_ip", ""),
+        "dst_ip": event.get("network.dst_ip", ""),
+        "vendor": event.get("observer.vendor", ""),
+        "action": event.get("event.action", ""),
+        "outcome": event.get("event.outcome", ""),
+        "category": event.get("event.category", ""),
+        "severity": event.get("event.severity", ""),
+        "parse_ok": event.get("parse.status") == "ok",
+        "duplicate": (event.get("unmapped") or {}).get("duplicate") is True,
+    }

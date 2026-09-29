@@ -20,7 +20,7 @@ python -m ulpf.pipeline samples out
 python -m ulpf.app out
 ```
 
-The pipeline writes `out/raw.jsonl` and `out/events.jsonl`. The app prints a URL such as `http://127.0.0.1:<port>/`; open it in a browser to browse and filter events. To re-parse before serving, use `python -m ulpf.app out --rebuild` (defaults to input folder `samples`).
+The pipeline writes `out/raw.jsonl`, `out/events.jsonl`, and `out/features.jsonl`. The app prints a URL such as `http://127.0.0.1:<port>/`; open it in a browser to browse and filter events. To re-parse before serving, use `python -m ulpf.app out --rebuild` (defaults to input folder `samples`).
 
 Run tests:
 
@@ -34,6 +34,8 @@ python -m pytest tests/ -v
 
 **`events.jsonl`** — One shared record per line with normalized fields (`network.*`, `observer.*`, `event.*`, `parse.*`, `provenance.*`, `unmapped`). Failed parses appear here with `parse.status` set to `failed` and provenance filled from the raw line.
 
+**`features.jsonl`** — One fixed-column row per event (`raw_hash`, `timestamp`, `src_ip`, `dst_ip`, `vendor`, `action`, `outcome`, `category`, `severity`, `parse_ok`, `duplicate`). No `raw_text`; join evidence via `raw_hash`.
+
 ## Adding a device
 
 1. Add `ulpf/parsers/<name>.py` with `parse(line, mapping)` and `register(registry)` that registers for the correct format (`syslog`, `cef`, `json`, `kv`, etc.).
@@ -41,6 +43,10 @@ python -m pytest tests/ -v
 3. Drop a sample file under `samples/` and re-run `python -m ulpf.pipeline samples out`.
 
 Do not add vendor or product names to `pipeline.py`; discovery goes through the parser registry and YAML only.
+
+## What a SIEM or a model receives
+
+`events.jsonl` is the full taxonomy. `features.jsonl` is the fixed columns, with no vendor sentence. `raw.jsonl` is the evidence. No model ships in this repository. Air-gap is unchanged.
 
 ## Air-gap
 

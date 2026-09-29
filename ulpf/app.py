@@ -276,6 +276,7 @@ def render_html(
       <input id="ip-filter" type="text" value="{q}" autocomplete="off">
     </label>
     <a class="button" href="/events.jsonl" download="events.jsonl">Download events.jsonl</a>
+    <a class="button" href="/features.jsonl" download="features.jsonl">Download features.jsonl</a>
   </p>
   <table>
     <thead>
@@ -347,11 +348,19 @@ class EventHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         events_path = self.out_dir / "events.jsonl"
-        if parsed.path in {"/events.jsonl", "/download/events.jsonl"}:
-            body = events_path.read_bytes() if events_path.is_file() else b""
+        downloads = {
+            "/events.jsonl": events_path,
+            "/download/events.jsonl": events_path,
+            "/features.jsonl": self.out_dir / "features.jsonl",
+            "/download/features.jsonl": self.out_dir / "features.jsonl",
+        }
+        if parsed.path in downloads:
+            path = downloads[parsed.path]
+            body = path.read_bytes() if path.is_file() else b""
+            name = path.name
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
-            self.send_header("Content-Disposition", 'attachment; filename="events.jsonl"')
+            self.send_header("Content-Disposition", f'attachment; filename="{name}"')
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

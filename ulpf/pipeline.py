@@ -60,15 +60,27 @@ def run(input_dir: str | Path, output_dir: str | Path) -> None:
     mappings = _load_mappings()
     raw_path = destination / "raw.jsonl"
     events_path = destination / "events.jsonl"
+    report: list[dict[str, Any]] = []
+    seen_hashes: set[str] = set()
 
     with raw_path.open("w", encoding="utf-8") as raw_out, events_path.open(
         "w", encoding="utf-8"
     ) as events_out:
         for source_file in _iter_input_files(source):
+            file_row: dict[str, Any] = {
+                "file": source_file.name,
+                "lines": 0,
+                "parsed": 0,
+                "failed": 0,
+                "duplicates": 0,
+                "formats": [],
+            }
+            formats: list[str] = []
             for line in source_file.read_text(encoding="utf-8").splitlines():
                 raw_text = line
                 if raw_text == "":
                     continue
+                file_row["lines"] += 1
                 raw_event_id = str(uuid.uuid4())
                 digest = raw_hash(raw_text)
                 ingest_time = datetime.now(timezone.utc).isoformat()
@@ -83,7 +95,8 @@ def run(input_dir: str | Path, output_dir: str | Path) -> None:
 
                 parsed = None
                 mapping_version = ""
-                for parse in parsers_for(detect(raw_text)):
+                detected = detect(raw_text)
+                for parse in parsers_for(detected):
                     mapping = _mapping_for(parse, mappings)
                     parsed = parse(raw_text, mapping)
                     if parsed is not None:
@@ -92,6 +105,7 @@ def run(input_dir: str | Path, output_dir: str | Path) -> None:
 
                 if parsed is None:
                     event = _failed_event(raw_text, raw_event_id, digest, ingest_time)
+                    file_row["failed"] += 1
                 else:
                     parsed["event_id"] = raw_event_id
                     parsed["provenance.raw_event_id"] = raw_event_id
@@ -100,8 +114,28 @@ def run(input_dir: str | Path, output_dir: str | Path) -> None:
                     parsed["provenance.mapping_version"] = mapping_version
                     parsed["provenance.ingest_time"] = ingest_time
                     event = finalize_event(parsed)
+                    file_row["parsed"] += 1
+
+                if digest in seen_hashes:
+                    unmapped = dict(event.get("unmapped") or {})
+                    unmapped["duplicate"] = True
+                    event["unmapped"] = unmapped
+                    file_row["duplicates"] += 1
+                else:
+                    seen_hashes.add(digest)
+
+                fmt = event.get("parse.format") or detected
+                if fmt and fmt not in formats:
+                    formats.append(fmt)
 
                 events_out.write(json.dumps(event, ensure_ascii=False) + "\n")
+            file_row["formats"] = formats
+            report.append(file_row)
+
+    (destination / "ingest_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main(argv: list[str] | None = None) -> None:

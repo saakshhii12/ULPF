@@ -16,6 +16,7 @@ PALOALTO_LOG = SAMPLES / "paloalto.log"
 SURICATA_LOG = SAMPLES / "suricata.log"
 SSHD_LOG = SAMPLES / "sshd.log"
 CHECKPOINT_LOG = SAMPLES / "checkpoint.log"
+REPLAY_LOG = SAMPLES / "replay.log"
 
 CISCO_OK = (
     "<166>Sep 27 10:30:12 fw1 : %ASA-6-302013: Built outbound TCP connection "
@@ -75,10 +76,10 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
 
     events1 = _load_events(out1)
     events2 = _load_events(out2)
-    assert len(events1) == 8
+    assert len(events1) == 9
     assert (out1 / "raw.jsonl").is_file()
     assert (out1 / "events.jsonl").is_file()
-    assert len((out1 / "raw.jsonl").read_text(encoding="utf-8").splitlines()) == 8
+    assert len((out1 / "raw.jsonl").read_text(encoding="utf-8").splitlines()) == 9
 
     raw_lines = CISCO_LOG.read_text(encoding="utf-8").splitlines()
     assert raw_lines == [CISCO_OK, CISCO_GARBAGE]
@@ -87,6 +88,7 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
     assert SURICATA_LOG.read_text(encoding="utf-8").splitlines() == [SURICATA]
     assert SSHD_LOG.read_text(encoding="utf-8").splitlines() == [SSHD]
     assert CHECKPOINT_LOG.read_text(encoding="utf-8").splitlines() == [CHECKPOINT]
+    assert REPLAY_LOG.read_text(encoding="utf-8").splitlines() == [FG2]
 
     by_text = _by_text(events1)
     for event in events1:
@@ -233,3 +235,34 @@ def test_checkpoint_does_not_require_pipeline_edit(tmp_path: Path) -> None:
     assert event["event.action"] == "Drop"
     assert event["event.outcome"] == "failure"
     assert event["parse.format"] == "kv"
+
+
+def test_replay_duplicate_flag_and_ingest_report(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    run(SAMPLES, out)
+    events = _load_events(out)
+    raw_rows = [json.loads(line) for line in (out / "raw.jsonl").read_text(encoding="utf-8").splitlines()]
+    report = json.loads((out / "ingest_report.json").read_text(encoding="utf-8"))
+    by_file = {row["file"]: row for row in report}
+
+    fg2_events = [event for event in events if event["provenance.raw_text"] == FG2]
+    assert len(fg2_events) == 2
+    assert len(raw_rows) == 9
+    assert len(events) == 9
+    assert "duplicate" not in fg2_events[0]["unmapped"]
+    assert fg2_events[1]["unmapped"]["duplicate"] is True
+    assert fg2_events[0]["provenance.raw_hash"] == fg2_events[1]["provenance.raw_hash"]
+    assert fg2_events[0]["parse.status"] == "ok"
+    assert fg2_events[1]["parse.status"] == "ok"
+
+    cisco = by_file["cisco.log"]
+    assert cisco["file"] == "cisco.log"
+    assert cisco["lines"] == 2
+    assert cisco["parsed"] == 1
+    assert cisco["failed"] == 1
+
+    replay = by_file["replay.log"]
+    assert replay["file"] == "replay.log"
+    assert replay["lines"] == 1
+    assert replay["duplicates"] == 1
+    assert cisco["duplicates"] == 0

@@ -22,17 +22,17 @@ def _events(tmp_path: Path) -> list[dict]:
 def test_app_counts_and_filter(tmp_path: Path) -> None:
     events = _events(tmp_path)
     counts = summarize(events)
-    assert counts["event_count"] == 8
+    assert counts["event_count"] == 9
     assert counts["failed_parses"] == 1
     assert counts["distinct_vendors"] == 6
     assert counts["authentication_failures"] == 1
 
     top = busiest_source_ips(events)
-    assert top[0] == ("203.0.113.5", 2)
+    assert top[0] == ("203.0.113.5", 3)
     assert len(top) == 5
 
     visible = filter_events(events, "203.0.113.5")
-    assert len(visible) == 2
+    assert len(visible) == 3
     assert {row["observer.vendor"] for row in visible} == {"Fortinet", "Palo Alto Networks"}
 
     data = page_data(events, "203.0.113.5")

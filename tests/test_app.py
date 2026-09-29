@@ -24,7 +24,7 @@ def test_app_counts_and_filter(tmp_path: Path) -> None:
     counts = summarize(events)
     assert counts["event_count"] == 8
     assert counts["failed_parses"] == 1
-    assert counts["distinct_vendors"] == 4
+    assert counts["distinct_vendors"] == 6
     assert counts["authentication_failures"] == 1
 
     top = busiest_source_ips(events)

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ulpf.schema import assume_utc_iso
+
 KV_RE = re.compile(r"(\w+)=(\S+)")
 PORT_FIELDS = {"network.src_port", "network.dst_port"}
 
@@ -40,11 +42,17 @@ def parse(line: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
 
     date = pairs.get("date", "")
     time = pairs.get("time", "")
+    assumed = False
     if date or time:
-        event["timestamp"] = f"{date} {time}".strip()
+        combined = f"{date} {time}".strip()
+        stamp = assume_utc_iso(combined, mapping.get("default_year"))
+        event["timestamp"] = stamp or combined
+        assumed = stamp is not None
         used.update({"date", "time"})
 
     event["unmapped"] = {key: value for key, value in pairs.items() if key not in used}
+    if assumed:
+        event["unmapped"]["timestamp_zone"] = "assumed_utc"
     return event
 
 

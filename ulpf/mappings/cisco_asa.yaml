@@ -1,4 +1,5 @@
 mapping_version: "1.0.0"
+default_year: 2026
 defaults:
   observer.vendor: Cisco
   observer.product: ASA

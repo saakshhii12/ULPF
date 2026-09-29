@@ -1,5 +1,7 @@
 mapping_version: "1.0.0"
 defaults:
+  observer.vendor: Suricata
+  observer.product: Suricata
   event.category: network
   parse.format: json
   parse.parser: suricata

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ulpf.schema import assume_utc_iso
+
 SYSLOG_RE = re.compile(
     r"^<(?P<pri>\d+)>"
     r"(?P<timestamp>\w+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+"
@@ -38,7 +40,8 @@ def parse(line: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
     action_map = (mapping.get("actions") or {}).get(verb) or {}
     event.update(action_map)
 
-    event["timestamp"] = header.group("timestamp")
+    stamp = assume_utc_iso(header.group("timestamp"), mapping.get("default_year"))
+    event["timestamp"] = stamp or header.group("timestamp")
     event["observer.name"] = header.group("host")
     event["network.src_ip"] = body.group("src_ip")
     event["network.src_port"] = int(body.group("src_port"))
@@ -54,6 +57,8 @@ def parse(line: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
         "message_id": header.group("msgid"),
         "pri": header.group("pri"),
     }
+    if stamp:
+        event["unmapped"]["timestamp_zone"] = "assumed_utc"
     return event
 
 

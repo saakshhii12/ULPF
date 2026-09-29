@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ulpf.schema import assume_utc_iso
+
 SSHD_RE = re.compile(
     r"^<(?P<pri>\d+)>"
     r"(?P<timestamp>\w+\s+\d+\s+\d{2}:\d{2}:\d{2})\s+"
@@ -26,7 +28,8 @@ def parse(line: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
     verb = match.group("verb")
     event.update((mapping.get("actions") or {}).get(verb) or {})
 
-    event["timestamp"] = match.group("timestamp")
+    stamp = assume_utc_iso(match.group("timestamp"), mapping.get("default_year"))
+    event["timestamp"] = stamp or match.group("timestamp")
     event["observer.name"] = match.group("host")
     event["user.name"] = match.group("user")
     event["network.src_ip"] = match.group("src_ip")
@@ -37,6 +40,8 @@ def parse(line: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
         "pri": match.group("pri"),
         "method": match.group("method") or "",
     }
+    if stamp:
+        event["unmapped"]["timestamp_zone"] = "assumed_utc"
     return event
 
 

@@ -50,6 +50,7 @@ def parse(line: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
         "version": header.group("version"),
         "device_version": header.group("dev_version"),
         "signature_id": header.group("sig_id"),
+        "timestamp": "absent",
         **{key: value for key, value in pairs.items() if key not in used},
     }
     return event

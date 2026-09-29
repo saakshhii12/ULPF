@@ -26,6 +26,7 @@ def parse(line: str, mapping: dict[str, Any]) -> dict[str, Any] | None:
     action = pairs.get("action", "")
     event.update((mapping.get("actions") or {}).get(action) or {})
     event["unmapped"] = {key: value for key, value in pairs.items() if key not in used}
+    event["unmapped"]["timestamp"] = "absent"
     return event
 
 

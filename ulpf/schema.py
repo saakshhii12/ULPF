@@ -1,7 +1,50 @@
 from __future__ import annotations
 
 import hashlib
+import re
+from datetime import datetime
 from typing import Any
+
+SYSLOG_CLOCK = re.compile(
+    r"^(?P<mon>[A-Za-z]{3})\s+(?P<day>\d{1,2})\s+(?P<clock>\d{2}:\d{2}:\d{2})$"
+)
+DATED_CLOCK = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})$")
+HAS_REAL_ZONE = re.compile(r"(Z|[+-]\d{2}:?\d{2})$")
+MONTHS = {
+    "Jan": 1,
+    "Feb": 2,
+    "Mar": 3,
+    "Apr": 4,
+    "May": 5,
+    "Jun": 6,
+    "Jul": 7,
+    "Aug": 8,
+    "Sep": 9,
+    "Oct": 10,
+    "Nov": 11,
+    "Dec": 12,
+}
+
+
+def assume_utc_iso(raw: str, default_year: int | str | None = None) -> str | None:
+    text = (raw or "").strip()
+    if not text or HAS_REAL_ZONE.search(text):
+        return None
+    syslog = SYSLOG_CLOCK.match(text)
+    if syslog:
+        if default_year is None:
+            return None
+        month = MONTHS.get(syslog.group("mon"))
+        if month is None:
+            return None
+        hour, minute, second = (int(part) for part in syslog.group("clock").split(":"))
+        parsed = datetime(int(default_year), month, int(syslog.group("day")), hour, minute, second)
+        return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+    dated = DATED_CLOCK.match(text)
+    if dated:
+        parsed = datetime.strptime(f"{dated.group(1)} {dated.group(2)}", "%Y-%m-%d %H:%M:%S")
+        return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return None
 
 EVENT_KEYS = (
     "event_id",

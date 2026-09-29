@@ -107,10 +107,14 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
     assert ok_event["event.category"] == "network"
     assert ok_event["parse.format"] == "syslog"
     assert ok_event["parse.status"] == "ok"
+    assert ok_event["timestamp"] == "2026-09-27T10:30:12Z"
+    assert ok_event["unmapped"]["timestamp_zone"] == "assumed_utc"
     assert ok_event["provenance.raw_text"] == raw_lines[0]
     assert ok_event["provenance.raw_hash"] == _sha256(raw_lines[0])
 
     assert failed_event["parse.status"] == "failed"
+    assert failed_event["observer.vendor"] == ""
+    assert failed_event["observer.product"] == ""
     assert failed_event["provenance.raw_text"] == "this is not a log"
     assert failed_event["network.src_ip"] == ""
     assert failed_event["network.src_port"] == ""
@@ -134,12 +138,16 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
     assert fg1["network.dst_ip"] == "8.8.8.8"
     assert fg1["network.dst_port"] == 53
     assert fg1["network.transport"] == "udp"
+    assert fg1["timestamp"] == "2026-09-27T10:31:00Z"
+    assert fg1["unmapped"]["timestamp_zone"] == "assumed_utc"
 
     assert fg2["network.src_ip"] == "203.0.113.5"
     assert fg2["network.src_port"] == 41000
     assert fg2["network.dst_ip"] == "198.51.100.1"
     assert fg2["network.dst_port"] == 443
     assert fg2["network.transport"] == "tcp"
+    assert fg2["timestamp"] == "2026-09-27T10:32:00Z"
+    assert fg2["unmapped"]["timestamp_zone"] == "assumed_utc"
 
     palo = by_text[PALOALTO]
     assert palo["parse.format"] == "cef"
@@ -151,8 +159,11 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
     assert palo["network.dst_port"] == 443
     assert palo["network.transport"] == "tcp"
     assert palo["event.action"] == "alert"
+    assert palo["event.outcome"] == "unknown"
     assert palo["event.severity"] == 10
     assert palo["parse.status"] == "ok"
+    assert palo["timestamp"] == ""
+    assert palo["unmapped"]["timestamp"] == "absent"
 
     suricata = by_text[SURICATA]
     assert suricata["parse.format"] == "json"
@@ -170,6 +181,9 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
     assert suricata["event.severity"] == 2
     assert suricata["parse.status"] == "ok"
     assert suricata["unmapped"]["signature"] == "Allowed DNS Query"
+    assert "timestamp_zone" not in suricata["unmapped"]
+    assert suricata["observer.vendor"] == "Suricata"
+    assert suricata["observer.product"] == "Suricata"
 
     sshd = by_text[SSHD]
     assert sshd["parse.format"] == "syslog"
@@ -181,6 +195,10 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
     assert sshd["event.outcome"] == "failure"
     assert sshd["event.category"] == "authentication"
     assert sshd["parse.status"] == "ok"
+    assert sshd["timestamp"] == "2026-09-27T10:34:00Z"
+    assert sshd["unmapped"]["timestamp_zone"] == "assumed_utc"
+    assert sshd["observer.vendor"] == "OpenSSH"
+    assert sshd["observer.product"] == "sshd"
 
     checkpoint = by_text[CHECKPOINT]
     assert checkpoint["observer.vendor"] == "Check Point"
@@ -190,6 +208,8 @@ def test_pipeline_parses_cisco_sample_and_keeps_failed_line(tmp_path: Path) -> N
     assert checkpoint["event.outcome"] == "failure"
     assert checkpoint["parse.format"] == "kv"
     assert checkpoint["parse.status"] == "ok"
+    assert checkpoint["timestamp"] == ""
+    assert checkpoint["unmapped"]["timestamp"] == "absent"
 
     by_text2 = _by_text(events2)
     for raw in (CISCO_OK, CISCO_GARBAGE, FG1, FG2, PALOALTO, SURICATA, SSHD, CHECKPOINT):
@@ -201,6 +221,8 @@ def test_checkpoint_does_not_require_pipeline_edit(tmp_path: Path) -> None:
     source = (ROOT / "ulpf" / "pipeline.py").read_text(encoding="utf-8")
     assert "checkpoint" not in source
     assert "Check Point" not in source
+    for name in ("Cisco", "Fortinet", "Palo", "Suricata", "OpenSSH"):
+        assert name not in source
 
     out = tmp_path / "out"
     run(SAMPLES, out)

@@ -1,5 +1,7 @@
 mapping_version: "1.0.0"
+default_year: 2026
 defaults:
+  observer.vendor: OpenSSH
   observer.product: sshd
   event.category: authentication
   parse.format: syslog
